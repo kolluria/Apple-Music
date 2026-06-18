@@ -3,14 +3,23 @@
 SCRIPT_DIR="${0:A:h}"
 ART_DIR="${TMPDIR:-/tmp}/am-art"
 
-_check_deps() {
-    local missing=()
-    command -v fzf               &>/dev/null || missing+=(fzf)
-    command -v SwitchAudioSource &>/dev/null || missing+=("switchaudio-osx")
-    if (( ${#missing[@]} )); then
-        print -u2 "Missing dependencies (brew install): ${(j:, :)missing}"
+_need() {
+    # _need CMD [brew-formula]  — abort with install hint if CMD is missing
+    local cmd="$1" pkg="${2:-$1}"
+    if ! command -v "$cmd" &>/dev/null; then
+        print -u2 "Required: $cmd  →  brew install $pkg"
         return 1
     fi
+}
+
+# Run at startup to verify the full dep set (used by `am check`)
+_check_deps() {
+    local ok=true
+    _need fzf            || ok=false
+    _need SwitchAudioSource switchaudio-osx || ok=false
+    command -v viu &>/dev/null \
+        || print "Optional: viu  →  brew install viu  (needed for album art in np)"
+    $ok
 }
 
 # ---------------------------------------------------------------------------
@@ -228,6 +237,7 @@ play() {
   -S                    Enable shuffle before playback."
 
     if [[ "$#" -eq 0 ]]; then printf '%s\n' "$usage"; return; fi
+    _need fzf || return 1
 
     local shuffle_on=false newargs=()
     for a in "$@"; do [[ "$a" == "-S" ]] && shuffle_on=true || newargs+=("$a"); done
@@ -317,10 +327,8 @@ play() {
 # output — switch system audio output device (hardware or AirPlay)
 # ---------------------------------------------------------------------------
 output() {
-    if ! command -v SwitchAudioSource &>/dev/null; then
-        print -u2 "Error: SwitchAudioSource not found. Install with: brew install switchaudio-osx"
-        return 1
-    fi
+    _need fzf || return 1
+    _need SwitchAudioSource switchaudio-osx || return 1
 
     local selected
     if [[ "$#" -eq 0 ]]; then
@@ -378,7 +386,9 @@ _usage="Usage: am [command] [options]
   stop                  Stop playback.
 
   output                Fzf-select audio output device.
-  output DEVICE         Switch directly to DEVICE (hardware or AirPlay)."
+  output DEVICE         Switch directly to DEVICE (hardware or AirPlay).
+
+  check                 Verify all dependencies are installed."
 
 if [[ "$#" -eq 0 ]]; then
     printf '%s\n' "$_usage"
@@ -391,6 +401,7 @@ else
         pause)  osascript -e 'tell application "Music" to pause' ;;
         resume) osascript -e 'tell application "Music" to play' ;;
         stop)   osascript -e 'tell application "Music" to stop' ;;
+        check)  _check_deps ;;
         *)      printf '%s\n' "$_usage" ;;
     esac
 fi
