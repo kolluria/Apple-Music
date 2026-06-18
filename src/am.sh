@@ -443,32 +443,51 @@ _catalog_open_in_music() {
 }
 
 _catalog_add_to_library() {
-    # Clicks Song > Add to Library in Music.app's menu bar via System Events.
-    # Requires Accessibility permission for iTerm2 (System Settings > Privacy & Security > Accessibility).
-    # Falls back to mini-player mode when Music.app is in full-screen (menu bar hidden).
-    local err
-    err=$(osascript \
+    # Strategy: press Return to play the highlighted catalog track (album view),
+    # then use AppleScript 'duplicate current track' to add it to the library.
+    # The Song > Add to Library menu is only active when a track is playing —
+    # it is greyed out when merely browsing a catalog page.
+    #
+    # Requires Accessibility permission for iTerm2.
+    local access_err
+    access_err=$(osascript \
         -e 'tell application "System Events"' \
         -e '  tell process "Music"' \
-        -e '    try' \
-        -e '      click menu item "Add to Library" of menu "Song" of menu bar 1' \
-        -e '    on error' \
-        -e '      keystroke "m" using {command down, shift down}' \
-        -e '      delay 1' \
-        -e '      click menu item "Add to Library" of menu "Song" of menu bar 1' \
-        -e '      keystroke "m" using {command down, shift down}' \
-        -e '    end try' \
+        -e '    keystroke return' \
         -e '  end tell' \
         -e 'end tell' 2>&1)
-    [[ "$err" == *"not allowed"* || "$err" == *"accessibility"* || "$err" == *"1002"* ]] && return 1
+    if [[ "$access_err" == *"not allowed"* || "$access_err" == *"accessibility"* \
+          || "$access_err" == *"1002"* ]]; then
+        return 1
+    fi
+
+    # Wait up to 8 seconds for the catalog track to start playing
+    local i state
+    for i in $(seq 1 8); do
+        sleep 1
+        state=$(osascript -e 'tell application "Music" to get player state as string' 2>/dev/null)
+        [[ "$state" == "playing" ]] && break
+    done
+
+    if [[ "$state" != "playing" ]]; then
+        print -u2 "Track did not start playing after Return key."; return 1
+    fi
+
+    # Add currently playing catalog track to library (no-op if already there)
+    osascript \
+        -e 'tell application "Music"' \
+        -e '  try' \
+        -e '    duplicate current track to library playlist 1' \
+        -e '  end try' \
+        -e 'end tell' 2>/dev/null
     return 0
 }
 
 _catalog_wait_for_library() {
     # $1 = track name, $2 = artist name
-    # Polls library playlist 1 until the track appears (up to 12 seconds).
+    # Polls library playlist 1 until the track appears (up to 15 seconds).
     local tname="$1" tartist="$2" i found
-    for i in $(seq 1 12); do
+    for i in $(seq 1 15); do
         sleep 1
         found=$(osascript -e 'on run argv' \
             -e 'set q to item 1 of argv' \
@@ -476,7 +495,10 @@ _catalog_wait_for_library() {
             -e 'set myTracks to {}' \
             -e 'tell application "Music"' \
             -e '  try' \
-            -e '    set myTracks to (every track of library playlist 1 whose name is q and artist is a)' \
+            -e '    set myTracks to myTracks & (every track of library playlist 1 whose name is q and artist is a)' \
+            -e '  end try' \
+            -e '  try' \
+            -e '    set myTracks to myTracks & (every track of playlist "Liked Music" whose name is q and artist is a)' \
             -e '  end try' \
             -e '  return (count of myTracks) as string' \
             -e 'end tell' \
@@ -540,7 +562,7 @@ for r in d.get("results", []):
             local selected
             selected=$(echo "$entries" | cut -f1 \
                 | fzf --prompt="Catalog > " --height=20 \
-                      --header="Apple Music catalog — select to open in Music.app")
+                      --header="Apple Music catalog — select to add to library and play")
             [[ -z "$selected" ]] && return 0
             local cid tid view_url am_url
             cid=$(echo "$entries"      | awk -F'\t' -v s="$selected" '$1==s{print $2; exit}')
