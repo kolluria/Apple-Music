@@ -80,10 +80,11 @@ Keybindings:
             if ! $text_mode; then
                 rm -f "$ART_DIR/tmp.png" "$ART_DIR/tmp.jpg"
                 osascript "$SCRIPT_DIR/album-art.applescript" "$ART_DIR" 2>/dev/null
+                art=""
                 if [[ -f "$ART_DIR/tmp.png" ]]; then
-                    art=$(clear; viu -b "$ART_DIR/tmp.png" -w 31 -h 14)
+                    art=$(viu -b "$ART_DIR/tmp.png" -w 31 -h 14 2>/dev/null)
                 elif [[ -f "$ART_DIR/tmp.jpg" ]]; then
-                    art=$(clear; viu -b "$ART_DIR/tmp.jpg" -w 31 -h 14)
+                    art=$(viu -b "$ART_DIR/tmp.jpg" -w 31 -h 14 2>/dev/null)
                 fi
             fi
         fi
@@ -107,8 +108,8 @@ Keybindings:
         progBG=${progressBars:$percentRemain}
         prog=${progressBars:0:$percentRemain}
 
+        clear
         if $text_mode; then
-            clear
             paste <(printf '%s\n' "$name" "$artist - $record" \
                 "$shuffleIcon $repeatIcon $currMin:$currSec ${cyan}${prog}${nocolor}${progBG} $endMin:$endSec" \
                 "$volIcon ${magenta}${volDisp}${nocolor}${volBG}")
