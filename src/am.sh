@@ -258,13 +258,21 @@ play() {
 
     _play_from_filter() {
         # $1 = AppleScript filter clause; remaining = osascript argv
+        # Searches both "Library" (local) and "Liked Music" (streaming saves)
         local clause="$1"; shift
         osascript \
             -e 'on run argv' \
             -e 'tell application "Music"' \
             -e "if (exists playlist \"$_tp\") then delete playlist \"$_tp\"" \
             -e "set name of (make new playlist) to \"$_tp\"" \
-            -e "set theseTracks to every track of playlist \"Library\" ${clause}" \
+            -e "set theseTracks to {}" \
+            -e 'try' \
+            -e "  set theseTracks to theseTracks & (every track of playlist \"Library\" ${clause})" \
+            -e 'end try' \
+            -e 'try' \
+            -e "  set theseTracks to theseTracks & (every track of playlist \"Liked Music\" ${clause})" \
+            -e 'end try' \
+            -e 'if theseTracks is {} then return' \
             -e 'repeat with t in theseTracks' \
             -e "duplicate t to playlist \"$_tp\"" \
             -e 'end repeat' \
@@ -343,6 +351,178 @@ play() {
 }
 
 # ---------------------------------------------------------------------------
+# add — add the currently playing track to a user playlist
+# ---------------------------------------------------------------------------
+add() {
+    local usage="Usage: add [PLAYLIST | --new PLAYLIST]
+
+  (no args)             Fzf-pick a user playlist and add the current track.
+  PLAYLIST              Add current track directly to PLAYLIST (must exist).
+  --new PLAYLIST        Create PLAYLIST if needed, then add current track."
+
+    local target new_playlist=false
+    case "${1:-}" in
+        --new)
+            [[ -z "$2" ]] && { printf '%s\n' "$usage"; return 1; }
+            new_playlist=true
+            target="$2" ;;
+        ""|-h|--help)
+            [[ "${1:-}" == "" ]] && { _need fzf || return 1
+                target=$(osascript -e 'tell application "Music" to get name of user playlists' \
+                    2>/dev/null | tr ',' '\n' | sed 's/^ //' | sort \
+                    | fzf --prompt="Add to playlist > " --height=20)
+                [[ -z "$target" ]] && return 0
+            } || { printf '%s\n' "$usage"; return 0; } ;;
+        *)
+            target="$*" ;;
+    esac
+
+    # Capture current track info before any AppleScript that might change state
+    local track_name artist_name
+    track_name=$(osascript -e 'tell application "Music" to get name of current track' 2>/dev/null)
+    artist_name=$(osascript -e 'tell application "Music" to get artist of current track' 2>/dev/null)
+
+    if [[ -z "$track_name" ]]; then
+        print -u2 "No track currently playing."; return 1
+    fi
+
+    # Library-first workflow: streaming URL tracks can't be duplicated directly to
+    # user playlists; they must be added to the Library source first, then re-found
+    # by name+artist and duplicated to the target playlist.
+    local result
+    result=$(osascript -e 'on run argv' \
+        -e 'set trackName  to item 1 of argv' \
+        -e 'set artistName to item 2 of argv' \
+        -e 'set targetPl   to item 3 of argv' \
+        -e 'set makeNew    to item 4 of argv' \
+        -e 'tell application "Music"' \
+        -e '  -- Create playlist if requested' \
+        -e '  if makeNew is "true" and not (exists user playlist targetPl) then' \
+        -e '    set name of (make new playlist) to targetPl' \
+        -e '  end if' \
+        -e '  if not (exists user playlist targetPl) then' \
+        -e '    return "error: playlist not found: " & targetPl' \
+        -e '  end if' \
+        -e '  -- Add to library (no-op if already there; use library playlist 1, not source "Library")' \
+        -e '  try' \
+        -e '    duplicate current track to library playlist 1' \
+        -e '  end try' \
+        -e '  delay 4' \
+        -e '  -- Re-find by name + artist in the library' \
+        -e '  set found to (every track of library playlist 1 whose name is trackName and artist is artistName)' \
+        -e '  if found is {} then' \
+        -e '    return "error: track not found in library after add: " & trackName' \
+        -e '  end if' \
+        -e '  duplicate (item 1 of found) to user playlist targetPl' \
+        -e '  return "ok"' \
+        -e 'end tell' \
+        -e 'end' \
+        "$track_name" "$artist_name" "$target" "$new_playlist" 2>&1)
+
+    case "$result" in
+        ok)    echo "Added \"$track_name\" → $target" ;;
+        error:*) print -u2 "${result#error: }"; return 1 ;;
+        *)     print -u2 "$result"; return 1 ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# catalog — iTunes Search API-powered full catalog search (no auth required)
+# ---------------------------------------------------------------------------
+_catalog_open_in_music() {
+    # Opens Music.app to the exact song page so the user can press play once.
+    # Programmatic catalog playback via AppleScript is not possible without
+    # UI automation or a paid MusicKit user token — this is Apple's design.
+    local url="$1"
+    osascript -e 'on run argv' \
+        -e 'tell application "Music"' \
+        -e '  activate' \
+        -e '  open location (item 1 of argv)' \
+        -e 'end tell' \
+        -e 'end' "$url" 2>/dev/null
+}
+
+_itunes_search() {
+    # $1 = search term, $2 = limit (default 15)
+    # Uses the public iTunes Search API — no auth, no account needed.
+    local term="$1" limit="${2:-15}"
+    local encoded
+    encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$term")
+    curl -sS --max-time 8 \
+        "https://itunes.apple.com/search?term=${encoded}&media=music&entity=song&limit=${limit}" \
+        2>/dev/null
+}
+
+catalog() {
+    local usage="Usage: catalog search QUERY
+
+  search QUERY          Search the full Apple Music / iTunes catalog (no setup
+                        required). Fzf-picks a song, opens Music.app to that
+                        exact track page, and prints the Apple Music URL.
+
+  Note: Apple Music's scripting API cannot auto-play catalog tracks that are
+  not already in your library. The workflow is:
+    1. am catalog search \"query\"  → opens Music.app to the song, press ↵/play
+    2. am add \"Playlist\"          → saves it to your library for future use
+    3. am play -s \"Song Name\"     → instant play from library next time"
+
+    case "${1:-}" in
+        search)
+            shift
+            [[ -z "$*" ]] && { printf '%s\n' "$usage"; return 1; }
+            _need fzf  || return 1
+            _need curl || return 1
+            local query="$*"
+            local raw
+            raw=$(_itunes_search "$query" 20)
+            if [[ -z "$raw" ]]; then
+                print -u2 "No response from iTunes Search API. Check your network."; return 1
+            fi
+            # Parse results into "Song – Artist (Album)\tCOLLECTION_ID\tTRACK_ID\tVIEW_URL"
+            local entries
+            entries=$(echo "$raw" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for r in d.get("results", []):
+    name    = r.get("trackName", "?")
+    artist  = r.get("artistName", "?")
+    album   = r.get("collectionName", "?")
+    tid     = str(r.get("trackId", ""))
+    cid     = str(r.get("collectionId", ""))
+    viewurl = r.get("trackViewUrl", "")
+    if tid and cid:
+        print(f"{name} \u2013 {artist} ({album})\t{cid}\t{tid}\t{viewurl}")
+' 2>/dev/null)
+            if [[ -z "$entries" ]]; then
+                print -u2 "No songs found for: $query"; return 1
+            fi
+            local selected
+            selected=$(echo "$entries" | cut -f1 \
+                | fzf --prompt="Catalog > " --height=20 \
+                      --header="Apple Music catalog — select to open in Music.app")
+            [[ -z "$selected" ]] && return 0
+            local cid tid view_url am_url
+            cid=$(echo "$entries"      | awk -F'\t' -v s="$selected" '$1==s{print $2; exit}')
+            tid=$(echo "$entries"      | awk -F'\t' -v s="$selected" '$1==s{print $3; exit}')
+            view_url=$(echo "$entries" | awk -F'\t' -v s="$selected" '$1==s{print $4; exit}')
+            am_url="https://music.apple.com/song/${tid}"
+
+            echo "Opening in Music.app: $selected"
+            _catalog_open_in_music "itmss://geo.music.apple.com/album/${cid}?i=${tid}&app=music"
+            echo ""
+            echo "Music.app is now showing this song. Press play (or ↵) to start."
+            echo "Apple Music URL: ${am_url}"
+            echo ""
+            echo "To save for instant play next time:"
+            echo "  am add \"Your Playlist\"     # after it starts playing"
+            echo "  am play -s \"$selected\"    # plays from library next time"
+            ;;
+
+        *) printf '%s\n' "$usage" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # volume — get or set Music.app playback volume
 # ---------------------------------------------------------------------------
 volume() {
@@ -368,50 +548,159 @@ volume() {
 }
 
 # ---------------------------------------------------------------------------
-# output — switch system audio output device (hardware or AirPlay)
+# output — switch SYSTEM audio output device (hardware only, no virtual loopback)
 # ---------------------------------------------------------------------------
+
+# Genuine hardware output devices: filter out virtual/loopback devices that
+# appear with the same device ID in both the input and output lists.
+_hw_outputs() {
+    _need SwitchAudioSource switchaudio-osx || return 1
+    SwitchAudioSource -a -f json 2>/dev/null | python3 -c "
+import sys, json
+devs = []
+for line in sys.stdin:
+    line = line.strip()
+    if line:
+        try: devs.append(json.loads(line))
+        except: pass
+input_ids  = {d['id'] for d in devs if d['type'] == 'input'}
+output_ids = {d['id'] for d in devs if d['type'] == 'output'}
+virtual    = input_ids & output_ids   # same ID in both = loopback/virtual
+for d in devs:
+    if d['type'] == 'output' and d['id'] not in virtual:
+        print(d['name'])
+"
+}
+
 output() {
     _need fzf || return 1
     _need SwitchAudioSource switchaudio-osx || return 1
 
-    # --list: print hardware output devices and exit (non-interactive)
     if [[ "${1:-}" == "--list" ]]; then
-        echo "Hardware output devices:"
-        SwitchAudioSource -t output -a 2>/dev/null | sed 's/^/  /'
+        local current
+        current=$(SwitchAudioSource -c 2>/dev/null)
+        echo "System audio output devices (* = current):"
+        _hw_outputs | while IFS= read -r dev; do
+            [[ "$dev" == "$current" ]] && echo "* $dev" || echo "  $dev"
+        done
         echo ""
-        echo "Current output: $(SwitchAudioSource -c 2>/dev/null)"
-        echo ""
-        echo "AirPlay devices are listed in the fzf picker (am output) or addressable by name."
+        echo "For Music.app-specific AirPlay routing, use: am airplay --list"
         return 0
     fi
 
     local selected
     if [[ "$#" -eq 0 ]]; then
-        local hw_devices
-        hw_devices=$(SwitchAudioSource -t output -a 2>/dev/null)
-        # --print-query lets the user type an AirPlay device name not in the hardware list
-        selected=$(printf '%s\n' "$hw_devices" \
-            | fzf --prompt="Audio Output > " --height=20 \
-                  --header="Hardware devices listed. Type any AirPlay device name to switch to it." \
+        selected=$(_hw_outputs \
+            | fzf --prompt="System Output > " --height=20 \
+                  --header="Real hardware outputs only. For Music.app AirPlay use: am airplay" \
                   --print-query | tail -1)
         [[ -z "$selected" ]] && return 0
     else
         selected="$*"
     fi
 
-    # Try direct hardware switch first; AirPlay falls back to UI automation
     if SwitchAudioSource -s "$selected" 2>/dev/null; then
-        echo "Output switched to: $selected"
+        echo "System output switched to: $selected"
     else
-        echo "Attempting AirPlay switch via Control Center (requires Accessibility permission)…"
+        echo "Not a hardware device — attempting AirPlay switch via Control Center…"
         if osascript "$SCRIPT_DIR/switch-output.applescript" "$selected"; then
-            echo "Output switched to: $selected"
+            echo "System output switched to: $selected"
         else
             print -u2 "Failed. Grant Terminal Accessibility access:"
             print -u2 "  System Settings → Privacy & Security → Accessibility"
             return 1
         fi
     fi
+}
+
+# ---------------------------------------------------------------------------
+# airplay — Music.app-native AirPlay output routing (independent of system output)
+# ---------------------------------------------------------------------------
+airplay() {
+    local usage="Usage: airplay [--list | DEVICE | off]
+
+  (no args)             Fzf-select a Music.app AirPlay output (exclusive switch).
+  --list                List available AirPlay outputs with active status.
+  DEVICE                Route Music.app audio to DEVICE exclusively.
+  off                   Stop AirPlay; play through the local Mac speakers."
+
+    _am_airplay_devices() {
+        # Returns lines of "* Name (kind)" or "  Name (kind)"
+        # Bulk property reads avoid the 'kind as string' coercion failure in loops
+        local names selected kinds
+        names=$(osascript -e 'tell application "Music" to get name of AirPlay devices' \
+            | tr ',' '\n' | sed 's/^ //')
+        selected=$(osascript -e 'tell application "Music" to get selected of AirPlay devices' \
+            | tr ',' '\n' | sed 's/^ //')
+        kinds=$(osascript -e 'tell application "Music" to get kind of AirPlay devices' \
+            | tr ',' '\n' | sed 's/^ //')
+        paste <(printf '%s\n' ${(f)names}) \
+              <(printf '%s\n' ${(f)selected}) \
+              <(printf '%s\n' ${(f)kinds}) \
+        | while IFS=$'\t' read -r nm sel knd; do
+            [[ "$sel" == "true" ]] && echo "* $nm ($knd)" || echo "  $nm ($knd)"
+        done
+    }
+
+    _am_airplay_switch() {
+        # $1 = device name to activate exclusively, or "" to route to computer
+        # Uses on-run argv to avoid injection with names containing quotes (e.g. 55" TV)
+        # Retries up to 3 times: Music.app returns -50 (parameter error) when a device
+        # is in a transient connecting/disconnecting state on the network.
+        local target="$1" attempt err
+        local -a cmd
+        if [[ -z "$target" ]]; then
+            cmd=(osascript
+                -e 'tell application "Music"'
+                -e '  repeat with d in AirPlay devices'
+                -e '    set selected of d to (kind of d is computer)'
+                -e '  end repeat'
+                -e 'end tell')
+        else
+            cmd=(osascript -e 'on run argv'
+                -e 'tell application "Music"'
+                -e '  repeat with d in AirPlay devices'
+                -e '    set selected of d to (name of d is (item 1 of argv))'
+                -e '  end repeat'
+                -e 'end tell'
+                -e 'end' "$target")
+        fi
+        for attempt in 1 2 3; do
+            err=$("${cmd[@]}" 2>&1) && return 0
+            [[ "$err" != *"-50"* ]] && { print -u2 "$err"; return 1; }
+            (( attempt < 3 )) && sleep 2
+        done
+        print -u2 "$err"; return 1
+    }
+
+    case "${1:-}" in
+        --list)
+            echo "Music.app AirPlay outputs (* = currently active):"
+            _am_airplay_devices | sed 's/^/  /'
+            ;;
+        off)
+            _am_airplay_switch "" && echo "Music output: switched to local Mac speakers" ;;
+        "")
+            _need fzf || return 1
+            local devices raw selected
+            raw=$(_am_airplay_devices)
+            [[ -z "$raw" ]] && { print -u2 "No AirPlay devices found in Music.app."; return 1; }
+            selected=$(printf '%s\n' "$raw" \
+                | fzf --prompt="Music Output > " --height=20 \
+                      --header="* = active  |  Tab=multi-select not supported; select one")
+            [[ -z "$selected" ]] && return 0
+            # Strip marker and kind suffix  "* Name (kind)" → "Name"
+            local devname
+            devname=$(echo "$selected" | sed 's/^[* ] //' | sed 's/ ([^)]*)$//')
+            _am_airplay_switch "$devname" && echo "Music output → $devname"
+            ;;
+        *)
+            _am_airplay_switch "$*" && echo "Music output → $*" \
+                || { printf '%s\n' "$usage"; return 1; }
+            ;;
+    esac
+
+    unfunction _am_airplay_devices _am_airplay_switch
 }
 
 # ---------------------------------------------------------------------------
@@ -445,9 +734,21 @@ _usage="Usage: am [command] [options]
   volume down           Decrease volume by 5%.
   volume N              Set volume to N (0-100).
 
-  output                Fzf-select audio output device.
-  output --list         List available hardware output devices.
-  output DEVICE         Switch directly to DEVICE (hardware or AirPlay).
+  output                Fzf-select system audio output device.
+  output --list         List real hardware output devices (no virtual/loopback).
+  output DEVICE         Switch system output to DEVICE.
+
+  airplay               Fzf-select Music.app AirPlay output (music-only routing).
+  airplay --list        List Music.app AirPlay outputs with active status.
+  airplay DEVICE        Route Music.app audio to DEVICE exclusively.
+  airplay off           Stop AirPlay; play through Mac speakers.
+
+  add                   Fzf-pick a playlist and add the current track.
+  add PLAYLIST          Add current track to PLAYLIST directly.
+  add --new PLAYLIST    Create PLAYLIST if needed and add current track.
+
+  catalog search QUERY  Search iTunes catalog → fzf pick → open in Music.app.
+                        No account required. Press play once; use 'am add' to save.
 
   check                 Verify all dependencies are installed."
 
@@ -458,12 +759,15 @@ else
         np)     shift; np "$@" ;;
         list)   shift; list "$@" ;;
         play)   shift; play "$@" ;;
-        output) shift; output "$@" ;;
-        pause)  osascript -e 'tell application "Music" to pause' ;;
+        output)  shift; output "$@" ;;
+        airplay) shift; airplay "$@" ;;
+        pause)   osascript -e 'tell application "Music" to pause' ;;
         resume) osascript -e 'tell application "Music" to play' ;;
         stop)   osascript -e 'tell application "Music" to stop' ;;
         volume) shift; volume "$@" ;;
-        check)  _check_deps ;;
+        add)     shift; add "$@" ;;
+        catalog) shift; catalog "$@" ;;
+        check)   _check_deps ;;
         *)      printf '%s\n' "$_usage" ;;
     esac
 fi
