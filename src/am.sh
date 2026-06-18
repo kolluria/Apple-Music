@@ -149,6 +149,14 @@ Keybindings:
     done
 }
 
+# Collect deduplicated track names from Library + Liked Music (covers local + streaming)
+_all_track_names() {
+    {
+        osascript -e 'tell application "Music" to get name of every track' 2>/dev/null
+        osascript -e 'tell application "Music" to get name of every track of playlist "Liked Music"' 2>/dev/null
+    } | tr ',' '\n' | sed 's/^ //' | sort | awk '!seen[$0]++'
+}
+
 # ---------------------------------------------------------------------------
 # list — enumerate library items
 # ---------------------------------------------------------------------------
@@ -180,8 +188,7 @@ list() {
             fi ;;
         -s)
             if [[ "$#" -eq 0 ]]; then
-                osascript -e 'tell application "Music" to get name of every track' \
-                    | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+                _all_track_names | /usr/bin/pr -t -a -3
             else
                 printf '%s\n' "$usage"
             fi ;;
@@ -280,15 +287,23 @@ play() {
         -s)
             local song
             if [[ "$#" -eq 0 ]]; then
-                song=$(osascript -e 'tell application "Music" to get name of every track' \
-                    | tr ',' '\n' | sed 's/^ //' | fzf --prompt="Song > " --height=20)
+                song=$(_all_track_names | fzf --prompt="Song > " --height=20)
                 [[ -z "$song" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$song"
             fi
             osascript -e 'on run argv' \
+                -e 'set targetName to item 1 of argv' \
                 -e 'tell application "Music"' \
-                -e 'set res to (tracks whose name is (item 1 of argv))' \
-                -e 'if res is not {} then play (item 1 of res)' \
+                -e '  set res to (tracks whose name is targetName)' \
+                -e '  if res is {} then' \
+                -e '    repeat with pl in playlists' \
+                -e '      try' \
+                -e '        set res to (tracks of pl whose name is targetName)' \
+                -e '        if res is not {} then exit repeat' \
+                -e '      end try' \
+                -e '    end repeat' \
+                -e '  end if' \
+                -e '  if res is not {} then play (item 1 of res)' \
                 -e 'end tell' \
                 -e 'end' "$@" ;;
         -r)
@@ -327,17 +342,53 @@ play() {
 }
 
 # ---------------------------------------------------------------------------
+# volume — get or set Music.app playback volume
+# ---------------------------------------------------------------------------
+volume() {
+    local usage="Usage: volume [up|down|N]
+
+  (no args)             Show current volume (0-100).
+  up                    Increase by 5%.
+  down                  Decrease by 5%.
+  N                     Set volume to N (0-100)."
+
+    case "${1:-}" in
+        "")
+            osascript -e 'tell application "Music" to get sound volume' ;;
+        up)
+            osascript -e 'tell application "Music" to set sound volume to sound volume + 5' ;;
+        down)
+            osascript -e 'tell application "Music" to set sound volume to sound volume - 5' ;;
+        [0-9]|[0-9][0-9]|100)
+            osascript -e "tell application \"Music\" to set sound volume to $1" ;;
+        *)
+            printf '%s\n' "$usage"; return 1 ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # output — switch system audio output device (hardware or AirPlay)
 # ---------------------------------------------------------------------------
 output() {
     _need fzf || return 1
     _need SwitchAudioSource switchaudio-osx || return 1
 
+    # --list: print hardware output devices and exit (non-interactive)
+    if [[ "${1:-}" == "--list" ]]; then
+        echo "Hardware output devices:"
+        SwitchAudioSource -t output -a 2>/dev/null | sed 's/^/  /'
+        echo ""
+        echo "Current output: $(SwitchAudioSource -c 2>/dev/null)"
+        echo ""
+        echo "AirPlay devices are listed in the fzf picker (am output) or addressable by name."
+        return 0
+    fi
+
     local selected
     if [[ "$#" -eq 0 ]]; then
         local hw_devices
         hw_devices=$(SwitchAudioSource -t output -a 2>/dev/null)
-        # --print-query so the user can also type an AirPlay device name not in the list
+        # --print-query lets the user type an AirPlay device name not in the hardware list
         selected=$(printf '%s\n' "$hw_devices" \
             | fzf --prompt="Audio Output > " --height=20 \
                   --header="Hardware devices listed. Type any AirPlay device name to switch to it." \
@@ -388,7 +439,13 @@ _usage="Usage: am [command] [options]
   resume                Resume playback.
   stop                  Stop playback.
 
+  volume                Show current volume (0-100).
+  volume up             Increase volume by 5%.
+  volume down           Decrease volume by 5%.
+  volume N              Set volume to N (0-100).
+
   output                Fzf-select audio output device.
+  output --list         List available hardware output devices.
   output DEVICE         Switch directly to DEVICE (hardware or AirPlay).
 
   check                 Verify all dependencies are installed."
@@ -404,6 +461,7 @@ else
         pause)  osascript -e 'tell application "Music" to pause' ;;
         resume) osascript -e 'tell application "Music" to play' ;;
         stop)   osascript -e 'tell application "Music" to stop' ;;
+        volume) shift; volume "$@" ;;
         check)  _check_deps ;;
         *)      printf '%s\n' "$_usage" ;;
     esac
