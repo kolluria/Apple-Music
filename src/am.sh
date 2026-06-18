@@ -254,7 +254,7 @@ play() {
         osascript \
             -e 'on run argv' \
             -e 'tell application "Music"' \
-            -e "if (exists playlist \"$_tp\") then delete playlist \"$_tp\" end if" \
+            -e "if (exists playlist \"$_tp\") then delete playlist \"$_tp\"" \
             -e "set name of (make new playlist) to \"$_tp\"" \
             -e "set theseTracks to every track of playlist \"Library\" ${clause}" \
             -e 'repeat with t in theseTracks' \
@@ -285,9 +285,12 @@ play() {
                 [[ -z "$song" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$song"
             fi
-            osascript -e 'on run argv
-                tell application "Music" to play track (item 1 of argv)
-            end' "$@" ;;
+            osascript -e 'on run argv' \
+                -e 'tell application "Music"' \
+                -e 'set res to (tracks whose name is (item 1 of argv))' \
+                -e 'if res is not {} then play (item 1 of res)' \
+                -e 'end tell' \
+                -e 'end' "$@" ;;
         -r)
             local record
             if [[ "$#" -eq 0 ]]; then
