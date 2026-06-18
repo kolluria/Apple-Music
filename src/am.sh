@@ -442,6 +442,50 @@ _catalog_open_in_music() {
         -e 'end' "$url" 2>/dev/null
 }
 
+_catalog_add_to_library() {
+    # Clicks Song > Add to Library in Music.app's menu bar via System Events.
+    # Requires Accessibility permission for iTerm2 (System Settings > Privacy & Security > Accessibility).
+    # Falls back to mini-player mode when Music.app is in full-screen (menu bar hidden).
+    local err
+    err=$(osascript \
+        -e 'tell application "System Events"' \
+        -e '  tell process "Music"' \
+        -e '    try' \
+        -e '      click menu item "Add to Library" of menu "Song" of menu bar 1' \
+        -e '    on error' \
+        -e '      keystroke "m" using {command down, shift down}' \
+        -e '      delay 1' \
+        -e '      click menu item "Add to Library" of menu "Song" of menu bar 1' \
+        -e '      keystroke "m" using {command down, shift down}' \
+        -e '    end try' \
+        -e '  end tell' \
+        -e 'end tell' 2>&1)
+    [[ "$err" == *"not allowed"* || "$err" == *"accessibility"* || "$err" == *"1002"* ]] && return 1
+    return 0
+}
+
+_catalog_wait_for_library() {
+    # $1 = track name, $2 = artist name
+    # Polls library playlist 1 until the track appears (up to 12 seconds).
+    local tname="$1" tartist="$2" i found
+    for i in $(seq 1 12); do
+        sleep 1
+        found=$(osascript -e 'on run argv' \
+            -e 'set q to item 1 of argv' \
+            -e 'set a to item 2 of argv' \
+            -e 'set myTracks to {}' \
+            -e 'tell application "Music"' \
+            -e '  try' \
+            -e '    set myTracks to (every track of library playlist 1 whose name is q and artist is a)' \
+            -e '  end try' \
+            -e '  return (count of myTracks) as string' \
+            -e 'end tell' \
+            -e 'end' "$tname" "$tartist" 2>/dev/null)
+        [[ "${found:-0}" -ge 1 ]] && return 0
+    done
+    return 1
+}
+
 _itunes_search() {
     # $1 = search term, $2 = limit (default 15)
     # Uses the public iTunes Search API — no auth, no account needed.
@@ -457,14 +501,11 @@ catalog() {
     local usage="Usage: catalog search QUERY
 
   search QUERY          Search the full Apple Music / iTunes catalog (no setup
-                        required). Fzf-picks a song, opens Music.app to that
-                        exact track page, and prints the Apple Music URL.
+                        required). Picks a song in fzf, adds it to your library
+                        automatically, then starts playing — no manual steps.
 
-  Note: Apple Music's scripting API cannot auto-play catalog tracks that are
-  not already in your library. The workflow is:
-    1. am catalog search \"query\"  → opens Music.app to the song, press ↵/play
-    2. am add \"Playlist\"          → saves it to your library for future use
-    3. am play -s \"Song Name\"     → instant play from library next time"
+  Requires: Accessibility permission for iTerm2
+    System Settings > Privacy & Security > Accessibility → enable iTerm2"
 
     case "${1:-}" in
         search)
@@ -507,15 +548,62 @@ for r in d.get("results", []):
             view_url=$(echo "$entries" | awk -F'\t' -v s="$selected" '$1==s{print $4; exit}')
             am_url="https://music.apple.com/song/${tid}"
 
+            # Parse track name and artist from "Song – Artist (Album)"
+            local track_name artist_name
+            track_name=$(echo "$selected" | sed 's/ – .*$//')
+            artist_name=$(echo "$selected" | sed 's/^[^–]* – //' | sed 's/ (.*)//')
+
+            # Record frontmost app so we can restore focus after Music.app opens
+            local prev_app
+            prev_app=$(osascript \
+                -e 'tell application "System Events" to get name of first process whose frontmost is true' \
+                2>/dev/null)
+
             echo "Opening in Music.app: $selected"
             _catalog_open_in_music "itmss://geo.music.apple.com/album/${cid}?i=${tid}&app=music"
-            echo ""
-            echo "Music.app is now showing this song. Press play (or ↵) to start."
-            echo "Apple Music URL: ${am_url}"
-            echo ""
-            echo "To save for instant play next time:"
-            echo "  am add \"Your Playlist\"     # after it starts playing"
-            echo "  am play -s \"$selected\"    # plays from library next time"
+
+            # Wait for Music.app to render the song page, then add to library
+            sleep 2
+            echo "Adding to library..."
+            if ! _catalog_add_to_library; then
+                echo ""
+                print -u2 "Could not click 'Add to Library' — Accessibility permission needed."
+                print -u2 "  System Settings > Privacy & Security > Accessibility → enable iTerm2"
+                echo ""
+                echo "Music.app is showing the song. Add it manually, then run:"
+                echo "  am play -s \"$track_name\""
+                return 1
+            fi
+
+            # Minimize Music.app and restore previous app focus
+            _catalog_restore_focus() {
+                osascript -e 'tell application "Music" to set miniaturized of window 1 to true' 2>/dev/null
+                [[ -n "$prev_app" && "$prev_app" != "Music" ]] && \
+                    osascript -e "tell application \"$prev_app\" to activate" 2>/dev/null
+            }
+
+            # Poll library until the track appears (up to 12 s)
+            echo "Waiting for library sync..."
+            if _catalog_wait_for_library "$track_name" "$artist_name"; then
+                _catalog_restore_focus
+                echo "Playing: $track_name"
+                osascript -e 'on run argv' \
+                    -e 'set q to item 1 of argv' \
+                    -e 'set myTracks to {}' \
+                    -e 'tell application "Music"' \
+                    -e '  try' \
+                    -e '    set myTracks to (every track of library playlist 1 whose name is q)' \
+                    -e '  end try' \
+                    -e '  if myTracks is not {} then play (item 1 of myTracks)' \
+                    -e 'end tell' \
+                    -e 'end' "$track_name" 2>/dev/null
+            else
+                # Sync timed out — still restore focus, give fallback command
+                _catalog_restore_focus
+                echo "Track added (library sync still in progress)."
+                echo "Run when ready:  am play -s \"$track_name\""
+            fi
+            unfunction _catalog_restore_focus
             ;;
 
         *) printf '%s\n' "$usage" ;;
@@ -747,8 +835,8 @@ _usage="Usage: am [command] [options]
   add PLAYLIST          Add current track to PLAYLIST directly.
   add --new PLAYLIST    Create PLAYLIST if needed and add current track.
 
-  catalog search QUERY  Search iTunes catalog → fzf pick → open in Music.app.
-                        No account required. Press play once; use 'am add' to save.
+  catalog search QUERY  Search iTunes catalog → fzf → auto-add to library → play.
+                        No account required. Needs Accessibility permission for iTerm2.
 
   check                 Verify all dependencies are installed."
 
