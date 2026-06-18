@@ -210,6 +210,12 @@ am play -s "Vintunnavaa"
 
 ---
 
+## 10. Known Limitations
+
+**Radio / Genius Station**: Starting a radio station seeded from a specific song is not supported. Apple Music's "Start Station" feature is only accessible via the UI right-click menu — there is no AppleScript command or URL scheme that can open a song-seeded station without UI automation or a paid MusicKit developer token. Use `am catalog search` to find and play a song, then use the Radio tab inside Music.app to start a station.
+
+---
+
 ## Tips
 
 - **Tip for quick access**: symlink the script into your PATH:
