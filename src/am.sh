@@ -183,9 +183,20 @@ list() {
                 osascript -e 'tell application "Music" to get name of playlists' \
                     | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             else
-                osascript -e 'on run args' \
-                    -e 'tell application "Music" to get name of every track of playlist (item 1 of args)' \
-                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+                local pattern="${(j: :)@}"
+                local result
+                result=$(osascript -e 'on run argv' \
+                    -e 'tell application "Music"' \
+                    -e '  set hits to (playlists whose name is (item 1 of argv))' \
+                    -e '  if hits is {} then return "NO_MATCH"' \
+                    -e '  return name of every track of (item 1 of hits)' \
+                    -e 'end tell' \
+                    -e 'end' "$pattern" 2>/dev/null)
+                if [[ "$result" == "NO_MATCH" || -z "$result" ]]; then
+                    print -u2 "No playlist found matching \"$pattern\". Run 'am list -p' to see all playlists."
+                    return 1
+                fi
+                echo "$result" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             fi ;;
         -s)
             if [[ "$#" -eq 0 ]]; then
@@ -198,27 +209,81 @@ list() {
                 osascript -e 'tell application "Music" to get album of every track' \
                     | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             else
+                local pattern="${(j: :)@}"
                 osascript -e 'on run args' \
-                    -e 'tell application "Music" to get name of every track whose album is (item 1 of args)' \
-                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+                    -e 'set q to item 1 of args' \
+                    -e 'set myTracks to {}' \
+                    -e 'tell application "Music"' \
+                    -e '  try' \
+                    -e '    set myTracks to myTracks & (every track of library playlist 1 whose album contains q)' \
+                    -e '  end try' \
+                    -e '  try' \
+                    -e '    set myTracks to myTracks & (every track of playlist "Liked Music" whose album contains q)' \
+                    -e '  end try' \
+                    -e '  if myTracks is {} then return {}' \
+                    -e '  set myNames to {}' \
+                    -e '  repeat with t in myTracks' \
+                    -e '    try' \
+                    -e '      set end of myNames to name of t' \
+                    -e '    end try' \
+                    -e '  end repeat' \
+                    -e '  return myNames' \
+                    -e 'end tell' \
+                    -e 'end' "$pattern" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             fi ;;
         -a)
             if [[ "$#" -eq 0 ]]; then
                 osascript -e 'tell application "Music" to get artist of every track' \
                     | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             else
+                local pattern="${(j: :)@}"
                 osascript -e 'on run args' \
-                    -e 'tell application "Music" to get name of every track whose artist is (item 1 of args)' \
-                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+                    -e 'set q to item 1 of args' \
+                    -e 'set myTracks to {}' \
+                    -e 'tell application "Music"' \
+                    -e '  try' \
+                    -e '    set myTracks to myTracks & (every track of library playlist 1 whose artist contains q)' \
+                    -e '  end try' \
+                    -e '  try' \
+                    -e '    set myTracks to myTracks & (every track of playlist "Liked Music" whose artist contains q)' \
+                    -e '  end try' \
+                    -e '  if myTracks is {} then return {}' \
+                    -e '  set myNames to {}' \
+                    -e '  repeat with t in myTracks' \
+                    -e '    try' \
+                    -e '      set end of myNames to name of t' \
+                    -e '    end try' \
+                    -e '  end repeat' \
+                    -e '  return myNames' \
+                    -e 'end tell' \
+                    -e 'end' "$pattern" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             fi ;;
         -g)
             if [[ "$#" -eq 0 ]]; then
                 osascript -e 'tell application "Music" to get genre of every track' \
                     | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             else
+                local pattern="${(j: :)@}"
                 osascript -e 'on run args' \
-                    -e 'tell application "Music" to get name of every track whose genre is (item 1 of args)' \
-                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+                    -e 'set q to item 1 of args' \
+                    -e 'set myTracks to {}' \
+                    -e 'tell application "Music"' \
+                    -e '  try' \
+                    -e '    set myTracks to myTracks & (every track of library playlist 1 whose genre contains q)' \
+                    -e '  end try' \
+                    -e '  try' \
+                    -e '    set myTracks to myTracks & (every track of playlist "Liked Music" whose genre contains q)' \
+                    -e '  end try' \
+                    -e '  if myTracks is {} then return {}' \
+                    -e '  set myNames to {}' \
+                    -e '  repeat with t in myTracks' \
+                    -e '    try' \
+                    -e '      set end of myNames to name of t' \
+                    -e '    end try' \
+                    -e '  end repeat' \
+                    -e '  return myNames' \
+                    -e 'end tell' \
+                    -e 'end' "$pattern" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
             fi ;;
         *) printf '%s\n' "$usage" ;;
     esac
@@ -257,11 +322,13 @@ play() {
     local _tp='am_temp'
 
     _play_from_filter() {
-        # $1 = AppleScript filter clause; remaining = osascript argv
-        # Searches both "Library" (local) and "Liked Music" (streaming saves)
+        # $1 = AppleScript filter clause using variable 'q'; remaining = pattern words (joined)
+        # 'q' is pre-extracted from argv so Music.app can use it in 'contains' predicates.
         local clause="$1"; shift
+        local pattern="${(j: :)@}"
         osascript \
             -e 'on run argv' \
+            -e 'set q to item 1 of argv' \
             -e 'tell application "Music"' \
             -e "if (exists playlist \"$_tp\") then delete playlist \"$_tp\"" \
             -e "set name of (make new playlist) to \"$_tp\"" \
@@ -272,13 +339,14 @@ play() {
             -e 'try' \
             -e "  set theseTracks to theseTracks & (every track of playlist \"Liked Music\" ${clause})" \
             -e 'end try' \
-            -e 'if theseTracks is {} then return' \
+            -e 'if theseTracks is {} then return "NO_MATCH"' \
             -e 'repeat with t in theseTracks' \
             -e "duplicate t to playlist \"$_tp\"" \
             -e 'end repeat' \
             -e "play playlist \"$_tp\"" \
             -e 'end tell' \
-            -e 'end' "$@"
+            -e 'end' "$pattern" | grep -q "NO_MATCH" \
+            && print -u2 "No tracks found matching \"$pattern\"."
     }
 
     case "$flag" in
@@ -290,9 +358,21 @@ play() {
                 [[ -z "$playlist" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$playlist"
             fi
+            local _pl_pattern="${(j: :)@}"
+            local _pl_check
+            _pl_check=$(osascript -e 'on run argv' \
+                -e 'tell application "Music"' \
+                -e '  if (playlists whose name is (item 1 of argv)) is {} then return "NO_MATCH"' \
+                -e '  return "ok"' \
+                -e 'end tell' \
+                -e 'end' "$_pl_pattern" 2>/dev/null)
+            if [[ "$_pl_check" == "NO_MATCH" ]]; then
+                print -u2 "No playlist found matching \"$_pl_pattern\". Run 'am list -p' to see all playlists."
+                unfunction _play_from_filter; return 1
+            fi
             osascript -e 'on run argv
                 tell application "Music" to play playlist (item 1 of argv)
-            end' "$@" ;;
+            end' "$_pl_pattern" ;;
         -s)
             local song
             if [[ "$#" -eq 0 ]]; then
@@ -300,10 +380,12 @@ play() {
                 [[ -z "$song" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$song"
             fi
+            local _s_pattern="${(j: :)@}"
             osascript -e 'on run argv' \
                 -e 'set targetName to item 1 of argv' \
                 -e 'tell application "Music"' \
                 -e '  set res to (tracks whose name is targetName)' \
+                -e '  if res is {} then set res to (tracks whose name contains targetName)' \
                 -e '  if res is {} then' \
                 -e '    repeat with pl in playlists' \
                 -e '      try' \
@@ -314,7 +396,7 @@ play() {
                 -e '  end if' \
                 -e '  if res is not {} then play (item 1 of res)' \
                 -e 'end tell' \
-                -e 'end' "$@" ;;
+                -e 'end' "$_s_pattern" ;;
         -r)
             local record
             if [[ "$#" -eq 0 ]]; then
@@ -323,7 +405,7 @@ play() {
                 [[ -z "$record" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$record"
             fi
-            _play_from_filter 'whose album is (item 1 of argv)' "$@" ;;
+            _play_from_filter 'whose album contains q' "$@" ;;
         -a)
             local artist
             if [[ "$#" -eq 0 ]]; then
@@ -332,7 +414,7 @@ play() {
                 [[ -z "$artist" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$artist"
             fi
-            _play_from_filter 'whose artist is (item 1 of argv)' "$@" ;;
+            _play_from_filter 'whose artist contains q' "$@" ;;
         -g)
             local genre
             if [[ "$#" -eq 0 ]]; then
@@ -341,7 +423,7 @@ play() {
                 [[ -z "$genre" ]] && { unfunction _play_from_filter; return 0; }
                 set -- "$genre"
             fi
-            _play_from_filter 'whose genre is (item 1 of argv)' "$@" ;;
+            _play_from_filter 'whose genre contains q' "$@" ;;
         -l)
             osascript -e 'tell application "Music" to play playlist "Library"' ;;
         *) printf '%s\n' "$usage" ;;
