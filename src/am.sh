@@ -1,355 +1,396 @@
 #!/bin/zsh
-np(){
-	init=1
-	help='false'
-	while :
-	do
-		vol=$(osascript -e 'tell application "Music" to get sound volume')
-		shuffle=$(osascript -e 'tell application "Music" to get shuffle enabled')
-		repeat=$(osascript -e 'tell application "Music" to get song repeat')
-	    keybindings="
-Keybindings:
 
-p                       Play / Pause
-f                       Forward one track
-b                       Backward one track
->                       Begin fast forwarding current track
-<                       Begin rewinding current track
-R                       Resume normal playback
-+                       Increase Music.app volume 5%
--                       Decrease Music.app volume 5%
-s                       Toggle shuffle
-r                       Toggle song repeat
-q                       Quit np
-Q                       Quit np and Music.app
-?                       Show / hide keybindings"
-		duration=$(osascript -e 'tell application "Music" to get {player position} & {duration} of current track')
-		arr=(`echo ${duration}`)
-		curr=$(cut -d . -f 1 <<< ${arr[-2]})
-		currMin=$(echo $(( curr / 60 )))
-		currSec=$(echo $(( curr % 60 )))
-		if [ ${#currMin} = 1 ]; then
-			currMin="0$currMin"
-		fi
-		if [ ${#currSec} = 1 ]; then
-			currSec="0$currSec"
-		fi
-		if (( curr < 2 || init == 1 )); then
-			init=0
-			name=$(osascript -e 'tell application "Music" to get name of current track')
-			name=${name:0:50}
-			artist=$(osascript -e 'tell application "Music" to get artist of current track')
-			artist=${artist:0:50}
-			record=$(osascript -e 'tell application "Music" to get album of current track')
-			record=${record:0:50}
-			end=$(cut -d . -f 1 <<< ${arr[-1]})
-			endMin=$(echo $(( end / 60 )))
-			endSec=$(echo $(( end % 60 )))
-			if [ ${#endMin} = 1 ]
-			then
-				endMin="0$endMin"
-			fi
-			if [ ${#endSec} = 1 ]
-			then
-				endSec="0$endSec"
-			fi
-			if [ "$1" != "-t" ]
-			then
-				rm ~/Library/Scripts/tmp*
-				osascript ~/Library/Scripts/album-art.applescript
-				if [ -f ~/Library/Scripts/tmp.png ]; then
-					art=$(clear; viu -b ~/Library/Scripts/tmp.png -w 31 -h 14)
-				else
-					art=$(clear; viu -b ~/Library/Scripts/tmp.jpg -w 31 -h 14)
-				fi
-			fi
-			cyan=$(echo -e '\e[00;36m')
-			magenta=$(echo -e '\033[01;35m')
-			nocolor=$(echo -e '\033[0m')
-		fi
-		if [ $vol = 0 ]; then
-			volIcon=🔇
-		else
-			volIcon=🔊
-		fi
-		vol=$(( vol / 12 ))
-		if [ $shuffle = 'false' ]; then
-			shuffleIcon='➡️ '
-		else
-			shuffleIcon=🔀
-		fi
-		if [ $repeat = 'off' ]; then
-			repeatIcon='↪️ '
-		elif [ $repeat = 'one' ]; then
-			repeatIcon=🔂
-		else
-			repeatIcon=🔁
-		fi
-		volBars='▁▂▃▄▅▆▇'
-		volBG=${volBars:$vol}
-		vol=${volBars:0:$vol}
-		progressBars='▇▇▇▇▇▇▇▇▇'
-		percentRemain=$(( (curr * 100) / end / 10 ))
-		progBG=${progressBars:$percentRemain}
-		prog=${progressBars:0:$percentRemain}
-		if [ "$1" = "-t" ]
-		then
-			clear
-			paste <(printf '%s\n' "$name" "$artist - $record" "$shuffleIcon $repeatIcon $(echo $currMin:$currSec ${cyan}${prog}${nocolor}${progBG} $endMin:$endSec)" "$volIcon $(echo "${magenta}$vol${nocolor}$volBG")") 
-		else
-			paste <(printf %s "$art") <(printf %s "") <(printf %s "") <(printf %s "") <(printf '%s\n' "$name" "$artist - $record" "$shuffleIcon $repeatIcon $(echo $currMin:$currSec ${cyan}${prog}${nocolor}${progBG} $endMin:$endSec)" "$volIcon $(echo "${magenta}$vol${nocolor}$volBG")") 
-		fi
-		if [ $help = 'true' ]; then
-			printf '%s\n' "$keybindings"
-		fi
-		input=$(/bin/bash -c "read -n 1 -t 1 input; echo \$input | xargs")
-		if [[ "${input}" == *"s"* ]]; then
-			if $shuffle ; then
-				osascript -e 'tell application "Music" to set shuffle enabled to false'
-			else
-				osascript -e 'tell application "Music" to set shuffle enabled to true'
-			fi
-		elif [[ "${input}" == *"r"* ]]; then
-			if [ $repeat = 'off' ]; then
-				osascript -e 'tell application "Music" to set song repeat to all'
-			elif [ $repeat = 'all' ]; then
-				osascript -e 'tell application "Music" to set song repeat to one'
-			else
-				osascript -e 'tell application "Music" to set song repeat to off'
-			fi
-		elif [[ "${input}" == *"+"* ]]; then
-			osascript -e 'tell application "Music" to set sound volume to sound volume + 5'
-		elif [[ "${input}" == *"-"* ]]; then
-			osascript -e 'tell application "Music" to set sound volume to sound volume - 5'
-		elif [[ "${input}" == *">"* ]]; then
-			osascript -e 'tell application "Music" to fast forward'
-		elif [[ "${input}" == *"<"* ]]; then
-			osascript -e 'tell application "Music" to rewind'
-		elif [[ "${input}" == *"R"* ]]; then
-			osascript -e 'tell application "Music" to resume'
-		elif [[ "${input}" == *"f"* ]]; then
-			osascript -e 'tell app "Music" to play next track'
-		elif [[ "${input}" == *"b"* ]]; then
-			osascript -e 'tell app "Music" to back track'
-		elif [[ "${input}" == *"p"* ]]; then
-			osascript -e 'tell app "Music" to playpause'
-		elif [[ "${input}" == *"q"* ]]; then
-			clear
-			exit
-		elif [[ "${input}" == *"Q" ]]; then
-			killall Music
-			clear
-			exit
-		elif [[ "${input}" == *"?"* ]]; then
-			if [ $help = 'false' ]; then
-				help='true'
-			else
-				help='false'
-			fi
-		fi
-		read -sk 1 -t 0.001
-	done
+SCRIPT_DIR="${0:A:h}"
+ART_DIR="${TMPDIR:-/tmp}/am-art"
+
+_check_deps() {
+    local missing=()
+    command -v fzf               &>/dev/null || missing+=(fzf)
+    command -v SwitchAudioSource &>/dev/null || missing+=("switchaudio-osx")
+    if (( ${#missing[@]} )); then
+        print -u2 "Missing dependencies (brew install): ${(j:, :)missing}"
+        return 1
+    fi
 }
-list(){
-	usage="Usage: list [-grouping] [name]
+
+# ---------------------------------------------------------------------------
+# np — Now Playing TUI
+# ---------------------------------------------------------------------------
+np() {
+    local text_mode=false
+    [[ "$1" == "-t" ]] && text_mode=true
+
+    mkdir -p "$ART_DIR"
+
+    local init=1 help=false
+    local cyan magenta nocolor
+    cyan=$(printf '\e[00;36m')
+    magenta=$(printf '\033[01;35m')
+    nocolor=$(printf '\033[0m')
+    local keybindings="
+Keybindings:
+  p   Play / Pause          f   Forward one track
+  b   Backward one track    >   Fast forward
+  <   Rewind                R   Resume normal playback
+  +   Volume +5%            -   Volume -5%
+  s   Toggle shuffle        r   Toggle song repeat
+  o   Switch audio output   q   Quit np
+  Q   Quit np + Music.app   ?   Show / hide keybindings"
+
+    local vol shuffle repeat duration arr curr currMin currSec
+    local name artist record end endMin endSec art input
+    local volIcon shuffleIcon repeatIcon volLevel
+    local volBars volBG volDisp progressBars progBG prog percentRemain
+
+    while :; do
+        vol=$(osascript -e 'tell application "Music" to get sound volume')
+        shuffle=$(osascript -e 'tell application "Music" to get shuffle enabled')
+        repeat=$(osascript -e 'tell application "Music" to get song repeat')
+        duration=$(osascript -e 'tell application "Music" to get {player position} & {duration} of current track')
+        arr=(`echo "${duration}"`)
+        curr=$(cut -d . -f 1 <<< "${arr[-2]}")
+        currMin=$(( curr / 60 ))
+        currSec=$(( curr % 60 ))
+        [[ ${#currMin} -eq 1 ]] && currMin="0$currMin"
+        [[ ${#currSec} -eq 1 ]] && currSec="0$currSec"
+
+        if (( curr < 2 || init == 1 )); then
+            init=0
+            name=$(osascript -e 'tell application "Music" to get name of current track')
+            name=${name:0:50}
+            artist=$(osascript -e 'tell application "Music" to get artist of current track')
+            artist=${artist:0:50}
+            record=$(osascript -e 'tell application "Music" to get album of current track')
+            record=${record:0:50}
+            end=$(cut -d . -f 1 <<< "${arr[-1]}")
+            endMin=$(( end / 60 ))
+            endSec=$(( end % 60 ))
+            [[ ${#endMin} -eq 1 ]] && endMin="0$endMin"
+            [[ ${#endSec} -eq 1 ]] && endSec="0$endSec"
+
+            if ! $text_mode; then
+                rm -f "$ART_DIR/tmp.png" "$ART_DIR/tmp.jpg"
+                osascript "$SCRIPT_DIR/album-art.applescript" "$ART_DIR" 2>/dev/null
+                if [[ -f "$ART_DIR/tmp.png" ]]; then
+                    art=$(clear; viu -b "$ART_DIR/tmp.png" -w 31 -h 14)
+                elif [[ -f "$ART_DIR/tmp.jpg" ]]; then
+                    art=$(clear; viu -b "$ART_DIR/tmp.jpg" -w 31 -h 14)
+                fi
+            fi
+        fi
+
+        if [[ $vol -eq 0 ]]; then volIcon='🔇'; else volIcon='🔊'; fi
+        volLevel=$(( vol / 12 ))
+        if [[ "$shuffle" == "false" ]]; then shuffleIcon='➡️ '; else shuffleIcon='🔀'; fi
+        case "$repeat" in
+            off) repeatIcon='↪️ ' ;;
+            one) repeatIcon='🔂' ;;
+            *)   repeatIcon='🔁' ;;
+        esac
+
+        volBars='▁▂▃▄▅▆▇'
+        volBG=${volBars:$volLevel}
+        volDisp=${volBars:0:$volLevel}
+
+        progressBars='▇▇▇▇▇▇▇▇▇'
+        percentRemain=$(( end > 0 ? (curr * 100) / end / 10 : 0 ))
+        (( percentRemain > 9 )) && percentRemain=9
+        progBG=${progressBars:$percentRemain}
+        prog=${progressBars:0:$percentRemain}
+
+        if $text_mode; then
+            clear
+            paste <(printf '%s\n' "$name" "$artist - $record" \
+                "$shuffleIcon $repeatIcon $currMin:$currSec ${cyan}${prog}${nocolor}${progBG} $endMin:$endSec" \
+                "$volIcon ${magenta}${volDisp}${nocolor}${volBG}")
+        else
+            paste <(printf %s "$art") <(printf %s "") <(printf %s "") <(printf %s "") \
+                <(printf '%s\n' "$name" "$artist - $record" \
+                "$shuffleIcon $repeatIcon $currMin:$currSec ${cyan}${prog}${nocolor}${progBG} $endMin:$endSec" \
+                "$volIcon ${magenta}${volDisp}${nocolor}${volBG}")
+        fi
+
+        [[ "$help" == "true" ]] && printf '%s\n' "$keybindings"
+
+        input=$(/bin/bash -c "read -n 1 -t 1 input; echo \$input | xargs")
+        case "$input" in
+            *s*) [[ "$shuffle" == "true" ]] \
+                    && osascript -e 'tell application "Music" to set shuffle enabled to false' \
+                    || osascript -e 'tell application "Music" to set shuffle enabled to true' ;;
+            *r*) case "$repeat" in
+                    off) osascript -e 'tell application "Music" to set song repeat to all' ;;
+                    all) osascript -e 'tell application "Music" to set song repeat to one' ;;
+                    *)   osascript -e 'tell application "Music" to set song repeat to off' ;;
+                 esac ;;
+            *+*)  osascript -e 'tell application "Music" to set sound volume to sound volume + 5' ;;
+            *-*)  osascript -e 'tell application "Music" to set sound volume to sound volume - 5' ;;
+            *\>*) osascript -e 'tell application "Music" to fast forward' ;;
+            *\<*) osascript -e 'tell application "Music" to rewind' ;;
+            *R*)  osascript -e 'tell application "Music" to resume' ;;
+            *f*)  osascript -e 'tell application "Music" to play next track' ;;
+            *b*)  osascript -e 'tell application "Music" to back track' ;;
+            *p*)  osascript -e 'tell application "Music" to playpause' ;;
+            *o*)  output ;;
+            *q*)  clear; return 0 ;;
+            *Q*)  killall Music; clear; return 0 ;;
+            *\?*) [[ "$help" == "true" ]] && help='false' || help='true' ;;
+        esac
+
+        read -sk 1 -t 0.001 2>/dev/null || true
+    done
+}
+
+# ---------------------------------------------------------------------------
+# list — enumerate library items
+# ---------------------------------------------------------------------------
+list() {
+    local usage="Usage: list [-grouping] [name]
 
   -s                    List all songs.
-  -r                    List all records.
-  -r PATTERN            List all songs in the record PATTERN.
+  -r                    List all albums.
+  -r PATTERN            List all songs in album PATTERN.
   -a                    List all artists.
-  -a PATTERN            List all songs by the artist PATTERN.
+  -a PATTERN            List all songs by artist PATTERN.
   -p                    List all playlists.
-  -p PATTERN            List all songs in the playlist PATTERN.
+  -p PATTERN            List all songs in playlist PATTERN.
   -g                    List all genres.
-  -g PATTERN            List all songs in the genre PATTERN."
-	if [ "$#" -eq 0 ]; then
-		printf '%s\n' "$usage";
-	else
-		if [ $1 = "-p" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				shift
-				osascript -e 'tell application "Music" to get name of playlists' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			else
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get name of every track of playlist (item 1 of args)' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			fi
-		elif [ $1 = "-s" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get name of every track' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			else
-				echo $usage
-			fi
-		elif [ $1 = "-r" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get album of every track' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			else
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get name of every track whose album is (item 1 of args)' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			fi
-		elif [ $1 = "-a" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get artist of every track' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			else
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get name of every track whose artist is (item 1 of args)' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			fi
-		elif [ $1 = "-g" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get genre of every track' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			else
-				shift
-				osascript -e 'on run args' -e 'tell application "Music" to get name of every track whose genre is (item 1 of args)' -e 'end' "$*" | tr "," "\n" | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
-			fi
-		else
-			printf '%s\n' "$usage";
-		fi
-	fi
+  -g PATTERN            List all songs in genre PATTERN."
+
+    if [[ "$#" -eq 0 ]]; then printf '%s\n' "$usage"; return; fi
+
+    local flag="$1"; shift
+    case "$flag" in
+        -p)
+            if [[ "$#" -eq 0 ]]; then
+                osascript -e 'tell application "Music" to get name of playlists' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            else
+                osascript -e 'on run args' \
+                    -e 'tell application "Music" to get name of every track of playlist (item 1 of args)' \
+                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            fi ;;
+        -s)
+            if [[ "$#" -eq 0 ]]; then
+                osascript -e 'tell application "Music" to get name of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            else
+                printf '%s\n' "$usage"
+            fi ;;
+        -r)
+            if [[ "$#" -eq 0 ]]; then
+                osascript -e 'tell application "Music" to get album of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            else
+                osascript -e 'on run args' \
+                    -e 'tell application "Music" to get name of every track whose album is (item 1 of args)' \
+                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            fi ;;
+        -a)
+            if [[ "$#" -eq 0 ]]; then
+                osascript -e 'tell application "Music" to get artist of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            else
+                osascript -e 'on run args' \
+                    -e 'tell application "Music" to get name of every track whose artist is (item 1 of args)' \
+                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            fi ;;
+        -g)
+            if [[ "$#" -eq 0 ]]; then
+                osascript -e 'tell application "Music" to get genre of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            else
+                osascript -e 'on run args' \
+                    -e 'tell application "Music" to get name of every track whose genre is (item 1 of args)' \
+                    -e 'end' "$@" | tr ',' '\n' | sort | awk '!seen[$0]++' | /usr/bin/pr -t -a -3
+            fi ;;
+        *) printf '%s\n' "$usage" ;;
+    esac
 }
 
+# ---------------------------------------------------------------------------
+# play — fuzzy-find and begin playback
+# ---------------------------------------------------------------------------
 play() {
-	usage="Usage: play [-grouping] [name]
+    local usage="Usage: play [-grouping] [name] [-S]
 
   -s                    Fzf for a song and begin playback.
   -s PATTERN            Play the song PATTERN.
-  -r                    Fzf for a record and begin playback.
-  -r PATTERN            Play from the record PATTERN.
+  -r                    Fzf for an album and begin playback.
+  -r PATTERN            Play from album PATTERN.
   -a                    Fzf for an artist and begin playback.
-  -a PATTERN            Play from the artist PATTERN.
+  -a PATTERN            Play from artist PATTERN.
   -p                    Fzf for a playlist and begin playback.
-  -p PATTERN            Play from the playlist PATTERN.
+  -p PATTERN            Play from playlist PATTERN.
   -g                    Fzf for a genre and begin playback.
-  -g PATTERN            Play from the genre PATTERN.
-  -l                    Play from your entire library."
-	if [ "$#" -eq 0 ]; then
-		printf '%s\n' "$usage"
-	else
-		if [ $1 = "-p" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				playlist=$(osascript -e 'tell application "Music" to get name of playlists' | tr "," "\n" | fzf)
-				set -- ${playlist:1}
-			else
-				shift
-			fi
-			osascript -e 'on run argv
-				tell application "Music" to play playlist (item 1 of argv)
-			end' "$*"
-		elif [ $1 = "-s" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				song=$(osascript -e 'tell application "Music" to get name of every track' | tr "," "\n" | fzf)
-				set -- ${song:1}
-			else
-				shift
-			fi
-		osascript -e 'on run argv
-			tell application "Music" to play track (item 1 of argv)
-		end' "$*"
-		elif [ $1 = "-r" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				record=$(osascript -e 'tell application "Music" to get album of every track' | tr "," "\n" | sort | awk '!seen[$0]++' | fzf)
-				set -- ${record:1}
-			else
-				shift
-			fi
-			osascript -e 'on run argv' -e 'tell application "Music"' -e 'if (exists playlist "temp_playlist") then' -e 'delete playlist "temp_playlist"' -e 'end if' -e 'set name of (make new playlist) to "temp_playlist"' -e 'set theseTracks to every track of playlist "Library" whose album is (item 1 of argv)' -e 'repeat with thisTrack in theseTracks' -e 'duplicate thisTrack to playlist "temp_playlist"' -e 'end repeat' -e 'play playlist "temp_playlist"' -e 'end tell' -e 'end' "$*"
-		elif [ $1 = "-a" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				artist=$(osascript -e 'tell application "Music" to get artist of every track' | tr "," "\n" | sort | awk '!seen[$0]++' | fzf)
-				set -- ${artist:1}
-			else
-				shift
-			fi
-			osascript -e 'on run argv' -e 'tell application "Music"' -e 'if (exists playlist "temp_playlist") then' -e 'delete playlist "temp_playlist"' -e 'end if' -e 'set name of (make new playlist) to "temp_playlist"' -e 'set theseTracks to every track of playlist "Library" whose artist is (item 1 of argv)' -e 'repeat with thisTrack in theseTracks' -e 'duplicate thisTrack to playlist "temp_playlist"' -e 'end repeat' -e 'play playlist "temp_playlist"' -e 'end tell' -e 'end' "$*"
-		elif [ $1 = "-g" ]
-		then
-			if [ "$#" -eq 1 ]; then
-				genre=$(osascript -e 'tell application "Music" to get genre of every track' | tr "," "\n" | sort | awk '!seen[$0]++' | fzf)
-				set -- ${genre:1}
-			else
-				shift
-			fi
-			osascript -e 'on run argv' -e 'tell application "Music"' -e 'if (exists playlist "temp_playlist") then' -e 'delete playlist "temp_playlist"' -e 'end if' -e 'set name of (make new playlist) to "temp_playlist"' -e 'set theseTracks to every track of playlist "Library" whose genre is (item 1 of argv)' -e 'repeat with thisTrack in theseTracks' -e 'duplicate thisTrack to playlist "temp_playlist"' -e 'end repeat' -e 'play playlist "temp_playlist"' -e 'end tell' -e 'end' "$*"
-		elif [ $1 = "-l" ]
-		then
-			osascript -e 'tell application "Music"' -e 'play playlist "Library"' -e 'end tell'
-		else
-			printf '%s\n' "$usage";
-		fi
-	fi
+  -g PATTERN            Play from genre PATTERN.
+  -l                    Play your entire library.
+
+  -S                    Enable shuffle before playback."
+
+    if [[ "$#" -eq 0 ]]; then printf '%s\n' "$usage"; return; fi
+
+    local shuffle_on=false newargs=()
+    for a in "$@"; do [[ "$a" == "-S" ]] && shuffle_on=true || newargs+=("$a"); done
+    set -- "${newargs[@]}"
+
+    $shuffle_on && osascript -e 'tell application "Music" to set shuffle enabled to true'
+
+    local flag="$1"; shift
+    local _tp='am_temp'
+
+    _play_from_filter() {
+        # $1 = AppleScript filter clause; remaining = osascript argv
+        local clause="$1"; shift
+        osascript \
+            -e 'on run argv' \
+            -e 'tell application "Music"' \
+            -e "if (exists playlist \"$_tp\") then delete playlist \"$_tp\" end if" \
+            -e "set name of (make new playlist) to \"$_tp\"" \
+            -e "set theseTracks to every track of playlist \"Library\" ${clause}" \
+            -e 'repeat with t in theseTracks' \
+            -e "duplicate t to playlist \"$_tp\"" \
+            -e 'end repeat' \
+            -e "play playlist \"$_tp\"" \
+            -e 'end tell' \
+            -e 'end' "$@"
+    }
+
+    case "$flag" in
+        -p)
+            local playlist
+            if [[ "$#" -eq 0 ]]; then
+                playlist=$(osascript -e 'tell application "Music" to get name of playlists' \
+                    | tr ',' '\n' | sed 's/^ //' | fzf --prompt="Playlist > " --height=20)
+                [[ -z "$playlist" ]] && { unfunction _play_from_filter; return 0; }
+                set -- "$playlist"
+            fi
+            osascript -e 'on run argv
+                tell application "Music" to play playlist (item 1 of argv)
+            end' "$@" ;;
+        -s)
+            local song
+            if [[ "$#" -eq 0 ]]; then
+                song=$(osascript -e 'tell application "Music" to get name of every track' \
+                    | tr ',' '\n' | sed 's/^ //' | fzf --prompt="Song > " --height=20)
+                [[ -z "$song" ]] && { unfunction _play_from_filter; return 0; }
+                set -- "$song"
+            fi
+            osascript -e 'on run argv
+                tell application "Music" to play track (item 1 of argv)
+            end' "$@" ;;
+        -r)
+            local record
+            if [[ "$#" -eq 0 ]]; then
+                record=$(osascript -e 'tell application "Music" to get album of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | sed 's/^ //' | fzf --prompt="Album > " --height=20)
+                [[ -z "$record" ]] && { unfunction _play_from_filter; return 0; }
+                set -- "$record"
+            fi
+            _play_from_filter 'whose album is (item 1 of argv)' "$@" ;;
+        -a)
+            local artist
+            if [[ "$#" -eq 0 ]]; then
+                artist=$(osascript -e 'tell application "Music" to get artist of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | sed 's/^ //' | fzf --prompt="Artist > " --height=20)
+                [[ -z "$artist" ]] && { unfunction _play_from_filter; return 0; }
+                set -- "$artist"
+            fi
+            _play_from_filter 'whose artist is (item 1 of argv)' "$@" ;;
+        -g)
+            local genre
+            if [[ "$#" -eq 0 ]]; then
+                genre=$(osascript -e 'tell application "Music" to get genre of every track' \
+                    | tr ',' '\n' | sort | awk '!seen[$0]++' | sed 's/^ //' | fzf --prompt="Genre > " --height=20)
+                [[ -z "$genre" ]] && { unfunction _play_from_filter; return 0; }
+                set -- "$genre"
+            fi
+            _play_from_filter 'whose genre is (item 1 of argv)' "$@" ;;
+        -l)
+            osascript -e 'tell application "Music" to play playlist "Library"' ;;
+        *) printf '%s\n' "$usage" ;;
+    esac
+
+    unfunction _play_from_filter
 }
 
-usage="Usage: am.sh [function] [-grouping] [name]
+# ---------------------------------------------------------------------------
+# output — switch system audio output device (hardware or AirPlay)
+# ---------------------------------------------------------------------------
+output() {
+    if ! command -v SwitchAudioSource &>/dev/null; then
+        print -u2 "Error: SwitchAudioSource not found. Install with: brew install switchaudio-osx"
+        return 1
+    fi
 
-  list -s              	List all songs in your library.
-  list -r              	List all records.
-  list -r PATTERN       List all songs in the record PATTERN.
-  list -a              	List all artists.
-  list -a PATTERN       List all songs by the artist PATTERN.
-  list -p              	List all playlists.
-  list -p PATTERN       List all songs in the playlist PATTERN.
-  list -g              	List all genres.
-  list -g PATTERN       List all songs in the genre PATTERN.
+    local selected
+    if [[ "$#" -eq 0 ]]; then
+        local hw_devices
+        hw_devices=$(SwitchAudioSource -t output -a 2>/dev/null)
+        # --print-query so the user can also type an AirPlay device name not in the list
+        selected=$(printf '%s\n' "$hw_devices" \
+            | fzf --prompt="Audio Output > " --height=20 \
+                  --header="Hardware devices listed. Type any AirPlay device name to switch to it." \
+                  --print-query | tail -1)
+        [[ -z "$selected" ]] && return 0
+    else
+        selected="$*"
+    fi
 
-  play -s               Fzf for a song and begin playback.
-  play -s PATTERN       Play the song PATTERN.
-  play -r              	Fzf for a record and begin playback.
-  play -r PATTERN       Play from the record PATTERN.
-  play -a              	Fzf for an artist and begin playback.
-  play -a PATTERN       Play from the artist PATTERN.
-  play -p              	Fzf for a playlist and begin playback.
-  play -p PATTERN       Play from the playlist PATTERN.
-  play -g              	Fzf for a genre and begin playback.
-  play -g PATTERN       Play from the genre PATTERN.
-  play -l              	Play from your entire library.
-  
-  np                    Open the \"Now Playing\" TUI widget.
-                        (Music.app track must be actively
-			playing or paused)
-  np -t			Open in text mode (disables album art)
- 
-  np keybindings:
+    # Try direct hardware switch first; AirPlay falls back to UI automation
+    if SwitchAudioSource -s "$selected" 2>/dev/null; then
+        echo "Output switched to: $selected"
+    else
+        echo "Attempting AirPlay switch via Control Center (requires Accessibility permission)…"
+        if osascript "$SCRIPT_DIR/switch-output.applescript" "$selected"; then
+            echo "Output switched to: $selected"
+        else
+            print -u2 "Failed. Grant Terminal Accessibility access:"
+            print -u2 "  System Settings → Privacy & Security → Accessibility"
+            return 1
+        fi
+    fi
+}
 
-  p                     Play / Pause
-  f                     Forward one track
-  b                     Backward one track
-  >                     Begin fast forwarding current track
-  <                     Begin rewinding current track
-  R                     Resume normal playback
-  +                     Increase Music.app volume 5%
-  -                     Decrease Music.app volume 5%
-  s                     Toggle shuffle
-  r                     Toggle song repeat
-  q                     Quit np
-  Q                     Quit np and Music.app
-  ?                     Show / hide keybindings"
-if [ "$#" -eq 0 ]; then
-	printf '%s\n' "$usage";
+# ---------------------------------------------------------------------------
+# Top-level dispatch
+# ---------------------------------------------------------------------------
+_usage="Usage: am [command] [options]
+
+  play -s [PATTERN]     Fzf/play a song.
+  play -r [PATTERN]     Fzf/play an album.
+  play -a [PATTERN]     Fzf/play by artist.
+  play -p [PATTERN]     Fzf/play a playlist.
+  play -g [PATTERN]     Fzf/play by genre.
+  play -l               Play entire library.
+  play ... -S           Enable shuffle before playback.
+
+  list -s               List all songs.
+  list -r [PATTERN]     List albums or songs in album.
+  list -a [PATTERN]     List artists or songs by artist.
+  list -p [PATTERN]     List playlists or songs in playlist.
+  list -g [PATTERN]     List genres or songs in genre.
+
+  np                    Open Now Playing TUI.
+  np -t                 Now Playing TUI (text-only, no album art).
+
+  pause                 Pause playback.
+  resume                Resume playback.
+  stop                  Stop playback.
+
+  output                Fzf-select audio output device.
+  output DEVICE         Switch directly to DEVICE (hardware or AirPlay)."
+
+if [[ "$#" -eq 0 ]]; then
+    printf '%s\n' "$_usage"
 else
-	if [ $1 = "np" ]
-	then
-		shift
-		np "$@"
-	elif [ $1 = "list" ]
-	then
-		shift
-		list "$@"
-	elif [ $1 = "play" ]
-	then
-		shift
-		play "$@"
-	else
-		printf '%s\n' "$usage";
-	fi
+    case "$1" in
+        np)     shift; np "$@" ;;
+        list)   shift; list "$@" ;;
+        play)   shift; play "$@" ;;
+        output) shift; output "$@" ;;
+        pause)  osascript -e 'tell application "Music" to pause' ;;
+        resume) osascript -e 'tell application "Music" to play' ;;
+        stop)   osascript -e 'tell application "Music" to stop' ;;
+        *)      printf '%s\n' "$_usage" ;;
+    esac
 fi
