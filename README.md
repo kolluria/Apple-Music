@@ -6,6 +6,18 @@
 
 <img src="np.png" width="800"/>
 
+## Quick Start
+
+```sh
+alias am='zsh /path/to/src/am.sh'
+am check   # verify all dependencies are installed
+```
+
+Required: [fzf](https://github.com/junegunn/fzf), [SwitchAudioSource](https://github.com/deweller/switchaudio-osx) (`brew install fzf switchaudio-osx`)  
+Optional: [Viu](https://github.com/atanunq/viu) (`brew install viu`) — needed for album art in `np`
+
+See [common-usages.md](common-usages.md) for a quick reference of day-to-day commands.
+
 ## Now Playing (np)
 
 Enjoy a simple "Now Playing" widget from your terminal.  Uses standard Unix tooling/piping, AppleScript for interfacing with Apple Music, and [Viu](https://github.com/atanunq/viu) for displaying the album art images.  It also includes keyboard shortcut bindings for basic playback controls.  Apart from toggling shuffle, toggling repeat, and changing the Music.app-specific volume, the other controls are already accessible from the special Fn key functions/touch bar.  
@@ -14,7 +26,7 @@ Dependencies: [Viu](https://github.com/atanunq/viu) (unless you always use text 
 
 Configuration: 
 
-* Place album-art.applescript at ~/Library/Scripts/album-art.applescript, or configure a valid path in the np() func of am.sh for wherever you decide to keep it
+* `album-art.applescript` lives in `src/` alongside `am.sh` — no additional setup needed.
 * (Optional) In the np() func of am.sh, adjust the `-h` dimension of the album art (look for the two calls to `viu`) to ensure a square appearance with your terminal emulator's line spacing
 
 Usage (aliased): `am np`
@@ -38,6 +50,7 @@ R                     Resume normal playback
 -                     Decrease Music.app volume 5%
 s                     Toggle shuffle
 r                     Toggle song repeat
+o                     Switch system audio output device
 q                     Quit np
 Q                     Quit np and Music.app
 ?                     Show / hide keybindings
@@ -65,12 +78,13 @@ list -p PATTERN       List all songs in the playlist PATTERN.
 list -g               List all genres.
 list -g PATTERN       List all songs in the genre PATTERN.
 ```
-Example: `am list -r In Rainbows` (not case-sensitive)
+Example: `am list -r In Rainbows` (not case-sensitive; partial matches work)
 
 Notes: 
 * Music.app does not need to be open or closed; it should launch itself silently when `list` is called
-* Only works on tracks saved to your Library (but they do not need to be downloaded)
+* Searches both the local Library and Liked Music playlist (covers local and streaming tracks)
 * Remember to escape any special characters or punctuation if passing a title (or wrap it in double quotes)
+* Multi-word names can be passed unquoted: `am list -a Ernesto Cortazar`
 
 ## Play
 
@@ -78,9 +92,9 @@ Begin playback of different song groupings or a specific song grouping in your l
 
 Dependencies: [fzf](https://github.com/junegunn/fzf) (unless you always play groupings by name)
 
-Usage (aliased): `am play [-grouping] [name]`
+Usage (aliased): `am play [-grouping] [name] [-S]`
 
-Usage (not aliased): `zsh am.sh play [-grouping] [name]`
+Usage (not aliased): `zsh am.sh play [-grouping] [name] [-S]`
 ```
 play -s               Fzf for a song and begin playback.
 play -s PATTERN       Play the song PATTERN.
@@ -93,46 +107,101 @@ play -p PATTERN       Play from the playlist PATTERN.
 play -g               Fzf for a genre and begin playback.
 play -g PATTERN       Play from the genre PATTERN.
 play -l               Play from your entire library.
+
+-S                    Enable shuffle before playback (combinable with any flag above).
 ```
-Example: `am play -a Radiohead` (not case-sensitive)
+Example: `am play -a Radiohead` (not case-sensitive; partial matches work)
 
 Notes: 
 * Music.app does not need to be open or closed; it should launch itself silently when `play` is called
-* Only works on tracks saved to your Library (but they do not need to be downloaded)
+* Searches both the local Library and Liked Music playlist (covers local and streaming tracks)
 * Remember to escape any special characters or punctuation if passing a title (or wrap it in double quotes)
+* Multi-word names can be passed unquoted: `am play -a Ernesto Cortazar`
 * calling `-p Library` will result in quite a delay, unlike `-l`, because it requires copying all the songs in your library into the temporary playlist
 
-### Optional AirPlay Snippet (not in src)
+## Volume
 
-Toggle the Music.app AirPlay audio output for a specific device. 
+Get or set Music.app's playback volume (0–100, independent of system volume).
 
-Configuration: 
-* Adjust the device strings to a device hostname of your choosing
-* Ideally adapt the argument name to match
+Usage (aliased): `am volume [up|down|N]`
 
 ```
-if [ $1 = "atv" ]
-   then
-    isActive=$(osascript -e 'tell application "Music" to get selected of AirPlay device "Apple TV"')
-    if [ $isActive = 'false' ]
-    then
-      osascript -e 'tell application "Music" to set selected of AirPlay device "Apple TV" to true'
-    else
-      osascript -e 'tell application "Music" to set selected of AirPlay device "Apple TV" to false'
-  fi
-fi
+volume                Show current volume (0-100).
+volume up             Increase by 5%.
+volume down           Decrease by 5%.
+volume N              Set volume to N (0-100).
 ```
-Example: `zsh ap.sh atv`
+
+## Output
+
+Switch the macOS **system-wide** audio output device. Affects all applications. Virtual and loopback devices (e.g. ZoomAudioDevice) are automatically filtered out.
+
+Dependencies: [SwitchAudioSource](https://github.com/deweller/switchaudio-osx) (`brew install switchaudio-osx`)
+
+Usage (aliased): `am output [--list | DEVICE]`
+
+```
+output                Fzf-pick a hardware output device.
+output --list         List real hardware output devices (* = current).
+output DEVICE         Switch system output to DEVICE directly.
+```
+
+Note: For Music.app-specific audio routing to AirPlay speakers, use `am airplay` instead.
+
+## AirPlay
+
+Route **Music.app's audio specifically** to an AirPlay device, independent of the system output. Useful when you want music on a TV or soundbar while system sounds stay on the Mac's speakers.
+
+Usage (aliased): `am airplay [--list | DEVICE | off]`
+
+```
+airplay               Fzf-pick a Music.app AirPlay output (exclusive switch).
+airplay --list        List available AirPlay outputs (* = currently active).
+airplay DEVICE        Route Music.app audio to DEVICE exclusively.
+airplay off           Stop AirPlay; play through local Mac speakers.
+```
+
+Example: `am airplay "Soundbar"` or `am airplay '55" Crystal UHD'`
+
+## Add
+
+Add the currently playing track to a user playlist. Works for both locally downloaded and streaming tracks (the command saves the track to your library first if needed).
+
+Usage (aliased): `am add [PLAYLIST | --new PLAYLIST]`
+
+```
+add                   Fzf-pick a user playlist and add the current track.
+add PLAYLIST          Add current track directly to PLAYLIST (must exist).
+add --new PLAYLIST    Create PLAYLIST if needed, then add current track.
+```
+
+Note: There is a ~4 second delay for streaming tracks while Music.app saves them to your library.
+
+## Catalog
+
+Search the full Apple Music / iTunes catalog without any account or token setup. Uses the public iTunes Search API.
+
+Dependencies: [fzf](https://github.com/junegunn/fzf), `curl`, `python3`
+
+Usage (aliased): `am catalog search QUERY`
+
+```
+catalog search QUERY  Search the catalog, fzf-pick a result, open in Music.app.
+```
+
+Example: `am catalog search "bohemian rhapsody"`
+
+Note: Apple Music's scripting API cannot auto-play catalog tracks that are not already in your library — this is Apple's design. After selecting a result, Music.app opens to that song's page; press play once. Use `am add` afterward to save it to your library for instant play next time.
 
 ### Known Problems
 
-- Error: `execution error: Music got an error: Application isn’t running. (-600)`
+- Error: `execution error: Music got an error: Application isn't running. (-600)`
   - Solution: Reboot. It seems to occur occasionally after having had Music.app open for too long while your Mac has slept. Other potential solutions can be found [here](https://stackoverflow.com/questions/19957268/applescript-fails-with-error-600-when-launched-over-ssh-on-mavericks)
 - Blinking for each output refresh when running np()
   - Consider using a lighter-weight terminal emulator, or even Terminal.app, where this doesn't seem to occur. I am not sure how to mitigate this for heavier terminal emulators such as iTerm2
 
 ### Ideas For Improvement
 
-* am.sh could be expanded with a function to call new AppleScript snippets to create, delete, or refine playlists; it would also be nice to be able to queue (as apposed to immediately play) a song or a group of songs, which is possible (though there is no native corresponding AppleScript function to accomplish this at present)
+* It would be nice to be able to queue (as opposed to immediately play) a song or a group of songs, though there is no native corresponding AppleScript function to accomplish this at present
 * This project could be forked and used in the backend to create a full client alternative to Music.app, though it would not be possible to browse for and save tracks outside of the user's library
 * See the Script Editor.app's dictionary API (Music.sdef) for an exhaustive reference of all the native Music.app variables and functions that can be interfaced via AppleScript
